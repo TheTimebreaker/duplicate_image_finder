@@ -2,14 +2,17 @@
 
 import logging
 import os
+import random
 import shutil
+import string
+import tempfile
 import time
 import traceback
 from collections.abc import Generator
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Any, Literal, Optional, overload, TypedDict
+from dataclasses import dataclass
 
-import alinas_utils as alut
 import imagehash
 import imagesize
 from pandas import DataFrame
@@ -23,21 +26,41 @@ Image.warnings.simplefilter("ignore", Image.DecompressionBombWarning)
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
+def atomic_write(filepath: Path, data: str, encoding: str) -> None:
+    """Write data to a file atomically, creating a .bak backup if the file exists."""
+    if filepath.is_dir():
+        raise ValueError("Cannot write file contents to a directory.")
+
+    if filepath.is_file():
+        backup_path = filepath.with_suffix(filepath.suffix + ".bak")
+        shutil.copy2(filepath, backup_path)
+
+    with tempfile.NamedTemporaryFile("w", encoding=encoding, dir=filepath.parent, delete=False) as tmp_file:
+        tmp_file.write(data)
+        tmp_path = Path(tmp_file.name)
+
+    try:
+        tmp_path.replace(filepath)
+    except Exception:
+        if tmp_path.is_file():
+            tmp_path.unlink()
+
+
 class Hashfile:
     """Main class that contains hashes of files of specified folder.
     Will load existing hashes, generate missing ones and write those to disk.
         path: Full path to directory
     """
 
-    def __init__(self, path: Path, ignore_hashfiles: bool = False):
+    def __init__(self, path: Path, ignore_hashfiles: bool = False) -> None:
         self.path = path
         self.noprint = True
         self.basename = "!hashes"
         self.ext = ".csv"
-        self.other_hashfilepaths: list[str] = []
+        self.other_hashfilepaths: list[Path] = []
         self.hashpath = self.path / (self.basename + self.ext)
 
-        self.data: dict[str, str | tuple | list] = {}
+        self.data: dict[str, tuple[str, int | None, int | None, int | None]] = {}
         self.hashfile_changes = False
         if not ignore_hashfiles:
             self._read_hashes()
@@ -47,13 +70,13 @@ class Hashfile:
         for p in self.other_hashfilepaths:
             send2trash(p)
 
-    def _read_single_hashfile(self, file: str) -> Generator[tuple[str, str]] | Generator[tuple[str, str, int, int, int]]:
+    def _read_single_hashfile(self, file: Path) -> Generator[tuple[str, str, int | None, int | None, int | None]]:
         with open(file, encoding="utf-8-sig") as f:
             for line in f.read().split("\n"):
                 values = line.split(",")
                 try:
                     filename, filehash = values
-                    yield filename, filehash
+                    yield filename, filehash, None, None, None
                 except ValueError:
                     try:
                         filename, filehash, pixel_height, pixel_length, filesize = values
@@ -72,44 +95,42 @@ class Hashfile:
                             continue
 
     def _read_hashes(self) -> None:
-        allfiles_filenames = {}
-        hashfiles: list[tuple[str, str]] = []
-        with os.scandir(self.path) as directory:
-            for file in directory:
-                if not file.is_file():
-                    continue
-                if self.basename in file.name and self.ext in file.name and not file.name.endswith(".bak"):
-                    hashfiles.append((file.path, file.name))
-                else:
-                    allfiles_filenames[file.name] = True
+        allfiles_filenames: set[str] = set()
+        hashfiles: list[Path] = []
+        for file in self.path.iterdir():
+            if not file.is_file():
+                continue
+            if self.basename in file.name and self.ext in file.name and not file.name.endswith(".bak"):
+                hashfiles.append(file)
+            else:
+                allfiles_filenames.add(file.name)
 
-        for hashfile_path, hashfile_name in hashfiles:
-            for elements in self._read_single_hashfile(hashfile_path):
-                filepath, filehash = elements[0], elements[1]
-                if not self.file_for_hash_exists(filepath, allfiles_filenames):
+        for hashfile in hashfiles:
+            for filename, filehash, pixel_height, pixel_length, filesize in self._read_single_hashfile(hashfile):
+                if not self.file_for_hash_exists(filename, allfiles_filenames):
                     self.hashfile_changes = True
-                elif filepath in self.data:  # removes conflicting hashes
-                    if self.data[filepath] != filehash:
-                        self.data.pop(filepath)
+                elif filename in self.data:  # removes conflicting hashes
+                    if self.data[filename][0] != filehash:
+                        self.data.pop(filename)
                 else:
-                    self.data[filepath] = elements[1:]
+                    self.data[filename] = (filehash, pixel_height, pixel_length, filesize)
 
-            if hashfile_name != self.basename + self.ext:
-                self.other_hashfilepaths.append(hashfile_path)
+            if hashfile.name != self.basename + self.ext:
+                self.other_hashfilepaths.append(hashfile)
 
         self._write_hashes()
         self._remove_other_hashfiles()
 
-    def file_for_hash_exists(self, filepath: str, allfiles: dict) -> bool:
+    def file_for_hash_exists(self, filepath: str, allfiles: set[str]) -> bool:
         return filepath in allfiles
 
     def _write_hashes(self) -> bool:
         if self.hashfile_changes is False:
             return True
-        lines_table = [[filename] + list(map(str, table)) for filename, table in self.data.items()]
+        lines_table = [[filename, *list(map(str, table))] for filename, table in self.data.items()]
         lines_strings = [f"{','.join(line)}" for line in lines_table]
         content_string = "\n".join(lines_strings)
-        alut.secureWriteToFile(directory=self.hashpath, content=content_string, encoding="utf-8-sig")
+        atomic_write(self.hashpath, content_string, "utf-8-sig")
         self.hashfile_changes = False
         return True
 
@@ -132,7 +153,7 @@ class Hashfile:
                         filepath = new_filepath
                 if is_image(filepath):  # warum schlägt das hier nicht an???
                     try:
-                        self.data[file.name] = [global_gethash(filepath)]
+                        self.data[file.name] = (generate_image_hash(filepath), None, None, None)
                         if self.hashfile_changes is False:
                             self.hashfile_changes = True
 
@@ -155,12 +176,12 @@ class Hashfile:
                     last_save = time.time()
         self._write_hashes()
 
-    def get_fullpath_image(self, filename: str) -> str:
-        return os.path.join(self.path, filename)
+    def get_fullpath_image(self, filename: str) -> Path:
+        return self.path / filename
 
-    def fullpath_key_value(self) -> dict[str, list]:  # ORIGINAL VERSION
+    def fullpath_key_value(self) -> Hashtable:
         """Returns dictionary with key: hash and value: fullpath to file."""
-        result: dict[str, list] = {}
+        result: Hashtable = Hashtable()
         for filename, elements in self.data.items():
             filehash = elements[0]
             if filehash in result:
@@ -169,119 +190,69 @@ class Hashfile:
                 result[filehash] = [self.get_fullpath_image(filename)]
         return result
 
-    # def fullpathKeyValue(self) -> dict[str, list]: v-A
-    #     '''Returns dictionary with key: hash and value: fullpath to file.'''
-    #     result:dict[str, list] = {}
-    #     for filename, elements in self.data.items():
-    #         hash = elements[0]
-    #         result.setdefault(hash, []).append(self.get_fullpath_image(filename))
-    #     return result
-
 
 class ArchiveHashfile(Hashfile):
     """Main class that loads archive hashes of specified folder.
     path: Full path to directory
     """
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: Path) -> None:
         self.folder = path
-        self.noprint = False
         self.basename = "!archival-hashes"
         self.ext = ".csv"
-        self.hashpath = os.path.join(self.folder, self.basename + self.ext)
-        self.data: dict[str, str | tuple | list] = {}
-        self.other_hashfilepaths: list[str] = []
+        self.hashpath = self.folder / (self.basename + self.ext)
+        self.data: dict[str, tuple[str, int | None, int | None, int | None]] = {}
+        self.other_hashfilepaths: list[Path] = []
         self.hashfile_changes = False
         self._read_hashes()
 
-    def set_data(self, new_data: dict[str, str | tuple | list]) -> None:
+    def set_data(self, new_data: dict[str, tuple[str, int | None, int | None, int | None]]) -> None:
         self.data = new_data
         self._write_hashes()
 
-    def get_fullpath_image(self, filename: str) -> str:
-        return os.path.join(self.folder, f"archiveHash_{filename}")
+    def get_fullpath_image(self, filename: str) -> Path:
+        return super().get_fullpath_image(f"archiveHash_{filename}")
 
-    def file_for_hash_exists(self, filepath: str, allfiles: dict) -> Literal[True]:
+    def file_for_hash_exists(self, filepath: str, allfiles: set[str]) -> Literal[True]:  # noqa: ARG002
         return True
 
     def archive_folder(self, delete_source: bool = False) -> None:
-        def remove_files(files: list) -> None:
+        def remove_files(files: list[Path]) -> None:
+            logging.info("Removing files after archiving...")
             for file in files:
                 try:
-                    os.remove(file)
-                    time.sleep(0.01)
+                    file.unlink()
                 except FileNotFoundError:
                     continue
+            logging.info("Removing files after archiving... Done!")
 
         hashes = Hashfile(self.folder)
-        rm_files = []
+        rm_files: list[Path] = []
         self.hashfile_changes = True
-        for i, filepath in enumerate(alut.listallfiles_GENERATOR(self.folder)):
-            logging.info(filepath)
-            if not self.noprint:
-                print(
-                    f"\rGenerating archive hashes, dimensions and filesize (#{i})... ",
-                    end="",
-                )
+        for i, filepath in enumerate(self.folder.iterdir()):
+            logging.info("Generating archive hashes, dimensions and filesize (#%s)... ", str(i))
             if not is_image(filepath):
                 continue
 
-            filename = f"{alut.id_generator(6)}.png"  # Rerolls in case of duplicate name :/
+            filename = f"{id_generator(6)}.png"
             while filename in self.data.keys():
-                filename = f"{alut.id_generator(6)}.png"
+                filename = f"{id_generator(6)}.png"
 
-            filehash = hashes.data[os.path.split(filepath)[-1]]  # Gets the data needed
-            if any(isinstance(filehash, instance) for instance in (list, tuple)):
-                filehash = filehash[0]
+            filehash = hashes.data[filepath.name][0]
             try:
                 width, height = imagesize.get(filepath)
-                filesize = os.path.getsize(filepath)
-                self.data[filename] = [filehash, int(height), int(width), filesize]
+                filesize = filepath.stat().st_size
+                self.data[filename] = (filehash, int(height), int(width), filesize)
             except UnidentifiedImageError, OSError:
-                logging.error("Error encountered that prevents hashing. Moved to */Duplicate image finder/errors .")
-                shutil.move(
-                    filepath,
-                    r"G:\Documents\Visual Studio Code projects\Duplicate image finder\errors",
-                )
+                logging.error("Error encountered on %s that prevents hashing.", str(filepath))
 
             rm_files.append(filepath)
 
         self._write_hashes()
-        rm_files.append(os.path.join(self.folder, "!hashes.csv"))
+        rm_files.append(self.folder / "!hashes.csv")
 
         if delete_source:
-            if not self.noprint:
-                print("Deleting files... ", end="")
             remove_files(rm_files)
-
-        if not self.noprint:
-            print("ALL DONE!")
-
-    # def splitarchives(self, deleteSource:bool = False, length:int = 50000) -> None:
-    # doesnt seem to work correctly from reading it, so ill leave that to future me
-    #     split_data:dict[int, dict] = {}
-    #     split_data_iter = 0
-    #     split_data[split_data_iter] = {}
-    #     for key, value in self.data.items():
-    #         split_data[split_data_iter][key] = value
-    #         if len(split_data[split_data_iter]) >= length:
-    #             split_data_iter += 1
-    #             split_data[split_data_iter] = {}
-
-    #     for i, data in split_data.items():
-    #         small = False
-    #         if not len(data) >= length:
-    #             small = True
-    #         temp_folder = os.path.join(self.folder, f"{small*'!small-'}{alut.id_generator(8)}")
-    #         while os.path.isdir(temp_folder):
-    #             temp_folder = os.path.join(self.folder, f"{small*'!small-'}{alut.id_generator(8)}")
-
-    #         alut.makedirs(temp_folder)
-    #         arch = ArchiveHashfile(temp_folder)
-    #         arch.set_data(data)
-
-    #     if deleteSource:
-    #         alut.rm2bin(self.hashpath)
 
     def remove_entry(self, filename: str) -> None:
         if filename in self.data.keys():
@@ -290,8 +261,8 @@ class ArchiveHashfile(Hashfile):
         self._write_hashes()
 
 
-def is_image(file: str) -> bool:
-    ext = alut.matchExtension(file)
+def is_image(file: Path) -> bool:
+    ext = file.suffix[1:]
     valid_extensions = [
         "jpg",
         "jpeg",
@@ -307,7 +278,12 @@ def is_image(file: str) -> bool:
     return ext in valid_extensions
 
 
-def global_gethash(file: str) -> str:
+def id_generator(size: int = 6) -> str:
+    chars = string.ascii_uppercase + string.ascii_lowercase + string.digits
+    return "".join(random.choice(chars) for _ in range(size))
+
+
+def generate_image_hash(file: str) -> str:
     return str(
         base64custom.Base64(
             int(
@@ -318,152 +294,164 @@ def global_gethash(file: str) -> str:
     )
 
 
-def all_subdirs(rootdir: str) -> Generator[str, None, None]:
-    yield rootdir
-    for root, dirs, _ in os.walk(rootdir, followlinks=True):
-        for subdir in dirs:
-            yield os.path.join(root, subdir)
+def all_subdirs(rootdir: Path) -> Generator[Path]:
+    """Yields the root directory and all its subdirectories recursively."""
+    root_path = Path(rootdir)
+    yield root_path
+    for subdir in root_path.rglob("*"):
+        if subdir.is_dir():
+            yield subdir
 
 
-def gethashtable(path: str, noprint: bool = False) -> dict[str, list]:
-    """Loads/Generates the hashtable."""
-    if not noprint:
-        print(f"Loading hashes from {path}... ", end="")
-    all_hashes: list[dict[str, list]] = []
+def combine_hashtables(*dicts: Hashtable) -> Hashtable:
+    merged: Hashtable = Hashtable()
+    for d in dicts:
+        for k, v in d.items():
+            merged.setdefault(k, []).extend(v)
+    return merged
+
+
+class Hashtable(dict[str, list[Path]]):
+    """A dict mapping strings to list of Paths.
+
+    This represents a map between a specific file hash and all the files that share this hash."""
+
+
+def get_recursive_hashtable(path: Path) -> Hashtable:
+    """Loads/Generates the Hashtable of all files contained in path and its subdirectories."""
+    logging.info("Loading hashes from %s... ", path)
+    all_hashes: list[Hashtable] = []
     for directory in all_subdirs(path):
-        ###################################################
-        ### LOADS FILEHASHES FOR ALL FILES IN DIRECTORY ###
-        ###################################################
         hashes = Hashfile(path=directory)
         all_hashes.append(hashes.fullpath_key_value())
 
-        ###################################################
-        ### LOADS ARCHIVAL HASHES #########################
-        ###################################################
         archive = ArchiveHashfile(path=directory)
         all_hashes.append(archive.fullpath_key_value())
 
-    if not noprint:
-        print("DONE!")
-    return alut.combineDictOfLists(*all_hashes)
+    logging.info("Loading hashes from %s... Done!", path)
+    return combine_hashtables(*all_hashes)
 
 
-def getdupegroups(dirhashes: list[dict] | dict, noprint: bool = False) -> list:
-    if not noprint:
-        print("Getting dupegroups... ", end="")
-    if isinstance(dirhashes, list):
-        combined: dict[str, list] = {}
-        for dirhash in dirhashes:
-            combined = alut.combineDictOfLists(combined, dirhash)
-    elif isinstance(dirhashes, dict):
-        combined = dirhashes
+class DuplicateGroup(list[Path]):
+    """A list collecting Paths to files.
 
-    dupe_groups_table = []
-    for files in combined.values():
+    This represents multiple files that were classified as 'being identically to one another'."""
+
+
+@dataclass
+class DeletionCandidate:
+    """An object collecting data about files, from which the best file will be kept and others will be deleted."""
+
+    filepath: Path
+    pixel_count: int
+    is_file: bool
+    filesize: int
+    archive_object: ArchiveHashfile | None
+
+
+def sort_deletion_candidates(
+    candidates: list[DeletionCandidate], *criteria: tuple[Literal["pixel_count", "is_file", "filesize"], Literal["ascending", "descending"]]
+) -> list[DeletionCandidate]:
+    def key_func(obj: DeletionCandidate) -> tuple[Any]:
+        key: list[Any] = []
+        for field, order in criteria:
+            value = getattr(obj, field)
+
+            # For descending, invert value
+            if order == "descending":
+                try:
+                    value = -value
+                except TypeError:  # fallback: use tuple trick
+                    value = (0, value)
+            key.append(value)
+        return tuple(key)
+
+    return sorted(candidates, key=key_func)
+
+
+def get_duplicate_groups(*hashtables: Hashtable) -> list[DuplicateGroup]:
+    logging.info("Getting dupegroups... ")
+    combined_hashtable = Hashtable()
+    for hashtable in hashtables:
+        combined_hashtable = combine_hashtables(combined_hashtable, hashtable)
+
+    duplicate_groups: list[DuplicateGroup] = []
+    for files in combined_hashtable.values():
         if len(files) > 1:
-            dupe_groups_table.append([[path] for path in files])
+            duplicate_groups.append(DuplicateGroup(files))
 
-    if not noprint:
-        print("DONE! ")
-    return dupe_groups_table
+    logging.info("Getting dupegroups... Done!")
+    return duplicate_groups
 
 
-def delgroups(
-    dupegroups: list[str],
-    rm_method: Literal["rm", "recycle"] = "recycle",
-    noprint: bool = False,
-) -> None:
-    """Deletes the duplicate files. rm_method = (rm|<default: recycle>)"""
+def extract_deletion_candidate(file: Path) -> DeletionCandidate | Literal[False]:
+    """Extracts a DeletionCandidate object from a given file. Returns False if not possible."""
+    try:
+        width, height = imagesize.get(file)
+        pixel_count = int(width * height)
+        return DeletionCandidate(filepath=file, pixel_count=pixel_count, is_file=True, filesize=file.stat().st_size, archive_object=None)
+    except UnidentifiedImageError, ValueError:
+        logging.error("UnidentifiedImageError or ValueError: Cannot identify file %s.", file)
+        return False
+    except FileNotFoundError:
+        try:
+            if file.name.startswith("archiveHash_"):
+                archive = ArchiveHashfile(path=file.parent)
+                elements = archive.data[file.name.replace("archiveHash_", "")]
+                _filename, pixel_height, pixel_length, size = elements
+                if pixel_height is None or pixel_length is None or size is None:
+                    raise TypeError("An archive hash returned None type elements, which shouldn't happen, ever.")
+                return DeletionCandidate(
+                    filepath=file,
+                    pixel_count=pixel_height * pixel_length,
+                    is_file=False,
+                    filesize=size,
+                    archive_object=archive,
+                )
+            logging.error("File %s could not be fetched neither as a file nor in the archive.", file.name)
+            return False
+        except KeyError:
+            logging.error("KeyError for file %s in Archive %s .", file.name, file.parent)
+            return False
 
-    def remove_group(
-        group: list[tuple[str, int, str, int, Optional[ArchiveHashfile]]],
-    ) -> None:
-        for i, (file, _, _, _, archive_hashfile_object) in enumerate(group):
-            is_first_file = i == 0
-            if is_first_file:
-                pass
-            elif str(os.path.split(file)[1]).startswith("archiveHash_"):
-                hashfilekey = str(os.path.split(file)[1]).replace("archiveHash_", "")
-                assert archive_hashfile_object
-                archive_hashfile_object.remove_entry(hashfilekey)
-            else:
-                if rm_method == "rm":
-                    os.remove(file)
-                elif rm_method == "recycle":
-                    send2trash(file)
 
-    length_counter = len(dupegroups)
-    if length_counter == 0:
-        if not noprint:
-            print("No files to delete!")
+def iter_deletion_groups(
+    duplicate_groups: list[DuplicateGroup],
+    *sorting_criteria: tuple[Literal["pixel_count", "is_file", "filesize"], Literal["ascending", "descending"]],
+) -> Generator[list[DeletionCandidate]]:
+    """Yields DeletionCandidate groups, sorted by the preferences set in sorting_criteria."""
+
+    duplicate_groups_len = len(duplicate_groups)
+    if duplicate_groups_len == 0:
+        logging.info("No duplicates found, so there's nothing to delete!")
         return
 
-    for i, group in enumerate(dupegroups):
-        if not noprint:
-            print(f"Deleting #{i+1} / {length_counter} groups... ", end="\r")
-        temp: list[tuple[str, int, str, int, Optional[ArchiveHashfile]]] = []
-        for file in group:
-            try:
-                width, height = imagesize.get(file[0])
-                dimension = int(width * height)
-                temp.append((file[0], dimension, "file", os.path.getsize(file[0]), None))
-            except FileNotFoundError:
-                try:
-                    if str(os.path.basename(file[0])).startswith("archiveHash_"):
-                        this_dir, this_file = os.path.split(file[0])
-                        assert isinstance(this_dir, str) and isinstance(this_file, str)
-                        archive = ArchiveHashfile(path=this_dir)
+    for duplicate_group in duplicate_groups:
+        deletion_candidates_unsorted: list[DeletionCandidate] = []
+        for file in duplicate_group:
+            extracted = extract_deletion_candidate(file)
+            if extracted:
+                deletion_candidates_unsorted.append(extracted)
+        yield sort_deletion_candidates(deletion_candidates_unsorted, *sorting_criteria)
 
-                        elements = archive.data[this_file.replace("archiveHash_", "")]
-                        assert not isinstance(elements, str)
-                        _, pixel_height, pixel_length, size = elements
-                        temp.append(
-                            (
-                                file[0],
-                                pixel_height * pixel_length,
-                                "archive",
-                                size,
-                                archive,
-                            )
-                        )
-                except KeyError:
-                    logging.error("DIF: KeyError for file %s in Archive %s .", this_file, this_dir)
 
-            except UnidentifiedImageError, ValueError:
-                logging.error(
-                    "UnidentifiedImageError or ValueError: Cannot identify file %s. Moved to */Duplicate image finder/errors .",
-                    file[0],
-                )
-                shutil.move(
-                    file[0],
-                    r"G:\Documents\Visual Studio Code projects\Downloader\!error_files",
-                )
+def delete_deletion_group(deletion_group: list[DeletionCandidate], deletion_method: Literal["rm", "recycle"]) -> None:
+    for i, deletion_candidate in enumerate(deletion_group):
+        is_first_file = i == 0
+        filepath = deletion_candidate.filepath
 
-        # sort_order = ["pixel", "archive or not", "filesize"]
-        ## 1 pixel: Prefer keeping files with higher pixel counts (generally files with higher height*width)
-        ## 2 archive: Keep archives over normal files
-        ## 3 filesize: Prefer keeping files with higher filesize (generally compressed files with higher quality)
-        if temp:
-            df = DataFrame(
-                temp,
-                columns=[
-                    "filename",
-                    "pixelcount",
-                    "type",
-                    "filesize",
-                    "archive_object",
-                ],
-            )
-            df.sort_values(
-                ["pixelcount", "type", "filesize"],
-                ascending=(False, True, False),
-                inplace=True,
-            )
-            temp = df.values.tolist()
-            remove_group(group=temp)
-
-    if not noprint:
-        print(f"Deleting files from {length_counter} groups... DONE!")
+        if is_first_file:
+            pass
+        elif filepath.name.startswith("archiveHash_"):
+            hashfilekey = filepath.name.replace("archiveHash_", "")
+            if deletion_candidate.archive_object is None:
+                raise ValueError("The archive object of a file marked as an archived file was unexpectedly empty.")
+            deletion_candidate.archive_object.remove_entry(hashfilekey)
+        else:
+            if deletion_method == "rm":
+                filepath.unlink()
+            elif deletion_method == "recycle":
+                send2trash(filepath)
 
 
 if __name__ == "__main__":
