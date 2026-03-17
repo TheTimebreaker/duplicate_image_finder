@@ -1,1 +1,1 @@
-from .duplicate_image_finder import *
+from .main import find_and_delete_duplicates

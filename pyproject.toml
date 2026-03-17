@@ -79,16 +79,6 @@ warn_return_any = true
 
 [[tool.mypy.overrides]]
 module = [
-  "easygui",
-  "pyperclip",
-  "wget",
-  "ratelimit",
-  "html_to_json",
-  "asynciolimiter",
-  "bs4",
-  "ffmpeg",
-  "psd_tools",
-  "plyer",
-  "ciso8601"
+  "imagesize"
 ]
 ignore_missing_imports = true
