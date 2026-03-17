@@ -5,12 +5,19 @@ description="A tool that uses image hashes to find duplicate images"
 authors=[{name="TheTimebreaker"}]
 readme="README.md"
 requires-python=">=3.14"
-dependencies = [] #TODO
+dependencies = [
+  "imagesize~=2.0.0",
+  "ImageHash~=4.3.2",
+  "pillow~=12.1.1",
+  "Send2Trash~=2.1.0",
+]
 
 [build-system]
 requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.package-data]
+duplicate-image-finder = ["py.typed"]
 
 [tool.ruff]
 line-length = 150
