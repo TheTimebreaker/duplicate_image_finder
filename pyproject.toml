@@ -1,0 +1,94 @@
+[project]
+name="duplicate-image-finder"
+version="1.0.0"
+description="A tool that uses image hashes to find duplicate images"
+authors=[{name="TheTimebreaker"}]
+readme="README.md"
+requires-python=">=3.14"
+dependencies = [] #TODO
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+
+[tool.ruff]
+line-length = 150
+target-version = "py314"
+
+exclude = [
+  ".venv",
+  "build",
+  "dist",
+  "__pycache__",
+  "__init__.py",
+]
+
+[tool.ruff.lint]
+select = [
+  "E",   # pycodestyle (errors)
+  "F",   # pyflakes
+  "I",   # isort (import sorting)
+  "B",   # flake8-bugbear (extra checks for likely bugs)
+  "UP",  # pyupgrade (modern Python syntax suggestions)
+  "N",   # pep8-naming
+  "ERA", # Mark commented out code
+  "ANN", # Some type annotations
+  "ASYNC", # Async checks
+  "FIX",
+  "ISC", # implicit str concat
+  "ICN", # import conventions
+  "G", #Logging format
+  "INP", #implicit-no-pep420
+  "PIE",
+  "Q", #flake8-quotes
+  "TD", #TODOs,
+  "ARG", #Unused args
+  "RUF", #Ruff specifics
+]
+extend-select = ["N815", "N816"]
+
+ignore = [
+  "ANN401", #allow type:Any
+  "TD003", #Missing issue link for TODO
+]
+
+[tool.pylint."MASTER"]
+disable = ["all"]
+enable = [
+  "W1203", #fstring in logging
+  "C0103", #invalid name
+]
+ignore-paths = [".venv"]
+
+
+[tool.black]
+line-length = 150
+target-version = ["py314"]
+
+[tool.mypy]
+python_version = "3.14"
+disallow_untyped_calls = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+disallow_any_generics = true
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_return_any = true
+
+
+[[tool.mypy.overrides]]
+module = [
+  "easygui",
+  "pyperclip",
+  "wget",
+  "ratelimit",
+  "html_to_json",
+  "asynciolimiter",
+  "bs4",
+  "ffmpeg",
+  "psd_tools",
+  "plyer",
+  "ciso8601"
+]
+ignore_missing_imports = true
