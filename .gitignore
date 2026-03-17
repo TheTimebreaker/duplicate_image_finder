@@ -1,5 +1,6 @@
-/.venv
-/.mypy_cache
-/__pycache__
-
+/.venv/
+/.mypy_cache/
+/__pycache__/
+/dist/
+*.egg-info/
 test.py
