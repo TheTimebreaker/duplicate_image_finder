@@ -1,10 +1,11 @@
 """Centralized functionality thats useful in multiple other files."""
 
+import os
 import random
 import shutil
 import string
 import tempfile
-from collections.abc import Generator
+from collections.abc import Generator, Iterable
 from pathlib import Path
 
 
@@ -62,10 +63,33 @@ def id_generator(size: int = 6) -> str:
     return "".join(random.choice(chars) for _ in range(size))
 
 
+def make_temp_symlink_dir(paths: Iterable[Path]) -> Path:
+    """
+    Takes an iterable of pathlib.Path objects, creates a temporary directory,
+    and fills it with symlinks to those paths (only if they are valid directories).
+
+    Returns:
+        Path to the temporary directory.
+    """
+    temp_dir = Path(tempfile.mkdtemp())
+    for i, original_path in enumerate(paths):
+        try:
+            if not original_path.exists() or not original_path.is_dir():
+                continue
+            symlink_path = temp_dir / f"{original_path.name}_{i}"
+            symlink_path.symlink_to(original_path)
+        except Exception as e:
+            print(f"Skipping {original_path}: {e}")
+    return temp_dir
+
+
+def delete_temp_symlink_dir(path: Path) -> None:
+    for element in path.iterdir():
+        element.unlink()
+    path.rmdir()
+
+
 def all_subdirs(rootdir: Path) -> Generator[Path]:
     """Yields the root directory and all its subdirectories recursively."""
-    root_path = Path(rootdir)
-    yield root_path
-    for subdir in root_path.rglob("*"):
-        if subdir.is_dir():
-            yield subdir
+    for dirpath, _dirnames, _filenames in os.walk(rootdir, followlinks=True):
+        yield Path(dirpath)
