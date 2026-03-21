@@ -4,6 +4,7 @@ import os
 import random
 import shutil
 import string
+import subprocess
 import tempfile
 from collections.abc import Generator, Iterable
 from pathlib import Path
@@ -28,6 +29,12 @@ def atomic_write(filepath: Path, data: str, encoding: str) -> None:
 
     if filepath.is_file():
         backup_path = filepath.with_suffix(filepath.suffix + ".bak")
+        if backup_path.is_file():
+            try:
+                backup_path.unlink()
+            except PermissionError:
+                subprocess.run(["attrib", "-H", str(backup_path.resolve())], check=True)
+                backup_path.unlink()
         shutil.copy2(filepath, backup_path)
 
     with tempfile.NamedTemporaryFile("w", encoding=encoding, dir=filepath.parent, delete=False) as tmp_file:
