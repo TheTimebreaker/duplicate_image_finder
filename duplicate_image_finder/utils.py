@@ -22,7 +22,7 @@ class DuplicateGroup(list[Path]):
     This represents multiple files that were classified as 'being identically to one another'."""
 
 
-def atomic_write(filepath: Path, data: str, encoding: str) -> None:
+def atomic_write(filepath: Path, data: str, encoding: str, newline: str | None = None) -> None:
     """Write data to a file atomically, creating a .bak backup if the file exists."""
     if filepath.is_dir():
         raise ValueError("Cannot write file contents to a directory.")
@@ -37,7 +37,7 @@ def atomic_write(filepath: Path, data: str, encoding: str) -> None:
                 backup_path.unlink()
         shutil.copy2(filepath, backup_path)
 
-    with tempfile.NamedTemporaryFile("w", encoding=encoding, dir=filepath.parent, delete=False) as tmp_file:
+    with tempfile.NamedTemporaryFile("w", encoding=encoding, dir=filepath.parent, delete=False, newline=newline) as tmp_file:
         tmp_file.write(data)
         tmp_path = Path(tmp_file.name)
 
