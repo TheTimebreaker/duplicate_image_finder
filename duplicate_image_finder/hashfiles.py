@@ -164,10 +164,10 @@ class ArchiveHashfile(Hashfile):
     """
 
     def __init__(self, path: Path) -> None:
-        self.folder = path
+        self.path = path
         self.basename = "!archival-hashes"
         self.ext = ".csv"
-        self.hashpath = self.folder / (self.basename + self.ext)
+        self.hashpath = self.path / (self.basename + self.ext)
         self.data: dict[str, tuple[str, int | None, int | None, int | None]] = {}
         self.other_hashfilepaths: list[Path] = []
         self.hashfile_changes = False
@@ -193,10 +193,10 @@ class ArchiveHashfile(Hashfile):
                     continue
             logging.info("Removing files after archiving... Done!")
 
-        hashes = Hashfile(self.folder)
+        hashes = Hashfile(self.path)
         rm_files: list[Path] = []
         self.hashfile_changes = True
-        for i, filepath in enumerate(self.folder.iterdir()):
+        for i, filepath in enumerate(self.path.iterdir()):
             logging.info("Generating archive hashes, dimensions and filesize (#%s)... ", str(i))
             if not is_image(filepath):
                 continue
@@ -216,7 +216,7 @@ class ArchiveHashfile(Hashfile):
             rm_files.append(filepath)
 
         self._write_hashes()
-        rm_files.append(self.folder / "!hashes.csv")
+        rm_files.append(self.path / "!hashes.csv")
 
         if delete_source:
             remove_files(rm_files)
