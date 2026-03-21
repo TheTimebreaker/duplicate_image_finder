@@ -1,3 +1,5 @@
+import csv
+import io
 import logging
 import time
 import traceback
@@ -50,7 +52,7 @@ class Hashfile:
         for p in self.other_hashfilepaths:
             send2trash(p)
 
-    def _read_single_hashfile(self, file: Path) -> Generator[tuple[str, str, int | None, int | None, int | None]]:
+    def _read_single_hashfile_legacy(self, file: Path) -> Generator[tuple[str, str, int | None, int | None, int | None]]:
         with open(file, encoding="utf-8-sig") as f:
             for line in f.read().split("\n"):
                 values = line.split(",")
@@ -74,6 +76,23 @@ class Hashfile:
                                 self.hashfile_changes = True
                             continue
 
+    def _read_single_hashfile(self, file: Path) -> Generator[tuple[str, str, int | None, int | None, int | None]]:
+        with open(file, encoding="utf-8-sig", newline="") as f:
+            reader = csv.reader(f)
+            for row in reader:
+                match len(row):
+                    case 0:
+                        self.hashfile_changes = True
+                        continue
+                    case 2:
+                        filename, filehash = row
+                        pixel_height, pixel_length, filesize = None, None, None
+                    case 5:
+                        filename, filehash, pixel_height, pixel_length, filesize = row[0], row[1], int(row[2]), int(row[3]), int(row[4])
+                    case _:
+                        raise ValueError("Hashfile %s broken, had a row with unusable number of elements: %s", file, row)
+                yield filename, filehash, pixel_height, pixel_length, filesize
+
     def _read_hashes(self) -> None:
         allfiles_filenames: set[str] = set()
         hashfiles: list[Path] = []
@@ -86,14 +105,24 @@ class Hashfile:
                 allfiles_filenames.add(file.name)
 
         for hashfile in hashfiles:
-            for filename, filehash, pixel_height, pixel_length, filesize in self._read_single_hashfile(hashfile):
-                if not self.file_for_hash_exists(filename, allfiles_filenames):
-                    self.hashfile_changes = True
-                elif filename in self.data:  # removes conflicting hashes
-                    if self.data[filename][0] != filehash:
-                        self.data.pop(filename)
-                else:
-                    self.data[filename] = (filehash, pixel_height, pixel_length, filesize)
+            try:
+                for filename, filehash, pixel_height, pixel_length, filesize in self._read_single_hashfile(hashfile):
+                    if not self.file_for_hash_exists(filename, allfiles_filenames):
+                        self.hashfile_changes = True
+                    elif filename in self.data:  # removes conflicting hashes
+                        if self.data[filename][0] != filehash:
+                            self.data.pop(filename)
+                    else:
+                        self.data[filename] = (filehash, pixel_height, pixel_length, filesize)
+            except ValueError:  # This is the error handling for older files; will be deprecated at some point
+                for filename, filehash, pixel_height, pixel_length, filesize in self._read_single_hashfile_legacy(hashfile):
+                    if not self.file_for_hash_exists(filename, allfiles_filenames):
+                        self.hashfile_changes = True
+                    elif filename in self.data:  # removes conflicting hashes
+                        if self.data[filename][0] != filehash:
+                            self.data.pop(filename)
+                    else:
+                        self.data[filename] = (filehash, pixel_height, pixel_length, filesize)
 
             if hashfile.name != self.basename + self.ext:
                 self.other_hashfilepaths.append(hashfile)
@@ -107,10 +136,17 @@ class Hashfile:
     def _write_hashes(self) -> bool:
         if self.hashfile_changes is False:
             return True
-        lines_table = [[filename, *list(map(str, table))] for filename, table in self.data.items()]
-        lines_strings = [f"{','.join(line)}" for line in lines_table]
-        content_string = "\n".join(lines_strings)
-        atomic_write(self.hashpath, content_string, "utf-8-sig")
+
+        rows: list[tuple[str, str, int | None, int | None, int | None]] = [(filename, *table) for filename, table in self.data.items()]
+        if any(row[2] is None and row[3] is None and row[4] is None for row in rows):
+            rows: list[tuple[str, str]] = [(row[0], row[1]) for row in rows]  # type: ignore
+
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        for row in rows:
+            writer.writerow(row)
+
+        atomic_write(self.hashpath, buffer.getvalue(), "utf-8-sig", newline="")
         self.hashfile_changes = False
         return True
 
