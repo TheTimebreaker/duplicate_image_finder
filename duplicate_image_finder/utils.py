@@ -12,6 +12,7 @@ from pathlib import Path
 import platformdirs
 
 pldirs = platformdirs.PlatformDirs("Duplicate Image Finder", "TheTimebreaker")
+(pldirs.user_config_path / "error-files").mkdir(parents=True, exist_ok=True)
 
 
 class Hashtable(dict[str, list[Path]]):

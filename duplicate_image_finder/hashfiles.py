@@ -173,7 +173,7 @@ class Hashfile:
                         self.hashfile_changes = True
 
                 except UnidentifiedImageError, OSError, UserWarning, Image.DecompressionBombError:
-                    dst = pldirs.user_config_path / file.name
+                    dst = pldirs.user_config_path / "error-files" / file.name
                     logging.error("An error occured while generating hash of file %s. Moving to %s", file, dst)
                     try:
                         shutil.move(file, dst)
