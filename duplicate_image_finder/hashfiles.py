@@ -172,7 +172,7 @@ class Hashfile:
                     if self.hashfile_changes is False:
                         self.hashfile_changes = True
 
-                except UnidentifiedImageError, OSError, UserWarning, Image.DecompressionBombError:
+                except UnidentifiedImageError, OSError, UserWarning, Image.DecompressionBombError, ValueError:
                     dst = pldirs.user_config_path / "error-files" / file.name
                     logging.error("An error occured while generating hash of file %s. Moving to %s", file, dst)
                     try:
