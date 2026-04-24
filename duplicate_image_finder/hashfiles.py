@@ -1,6 +1,7 @@
 import csv
 import io
 import logging
+import shutil
 import time
 import traceback
 from collections.abc import Generator
@@ -13,7 +14,7 @@ from PIL import Image, UnidentifiedImageError
 from send2trash import send2trash
 
 from .base64custom import Base64
-from .utils import Hashtable, atomic_write, id_generator, is_image
+from .utils import Hashtable, atomic_write, id_generator, is_image, pldirs
 
 
 def generate_image_hash(file: Path) -> str:
@@ -171,8 +172,13 @@ class Hashfile:
                     if self.hashfile_changes is False:
                         self.hashfile_changes = True
 
-                except UnidentifiedImageError, OSError, UserWarning:
-                    logging.error("An error occured while generating hash of file %s.", file)
+                except UnidentifiedImageError, OSError, UserWarning, Image.DecompressionBombError:
+                    dst = pldirs.user_config_path / file.name
+                    logging.error("An error occured while generating hash of file %s. Moving to %s", file, dst)
+                    try:
+                        shutil.move(file, dst)
+                    finally:
+                        pass
 
             if time.time() - last_save > 30:  # Saves every ~30 seconds
                 self._write_hashes()

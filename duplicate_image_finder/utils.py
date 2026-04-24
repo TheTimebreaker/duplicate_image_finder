@@ -9,6 +9,10 @@ import tempfile
 from collections.abc import Generator, Iterable
 from pathlib import Path
 
+import platformdirs
+
+pldirs = platformdirs.PlatformDirs("Duplicate Image Finder", "TheTimebreaker")
+
 
 class Hashtable(dict[str, list[Path]]):
     """A dict mapping strings to list of Paths.
