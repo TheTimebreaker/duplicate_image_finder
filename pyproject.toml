@@ -1,6 +1,6 @@
 [project]
 name="duplicate-image-finder"
-version="2.0.3"
+dynamic = ["version"]
 description="A tool that uses image hashes to find duplicate images"
 authors=[{name="TheTimebreaker"}]
 readme="README.md"
@@ -21,7 +21,7 @@ dev = [
 ]
 
 [build-system]
-requires = ["setuptools", "wheel"]
+requires = ["setuptools>=80", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.package-data]
