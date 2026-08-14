@@ -5,7 +5,7 @@ From a top-level view: this project can be used in other python project to check
 <h2>How does this project stand out?</h2>
 
 * It is generally built as a dependency rather than a standalone program. This makes it useful for cleaning up in e.g. file scrapers, which can potentially download a ton of duplicate data.
-* It stores the image hashes in seperate files, so that, once generated, the hashes don't need to be generated again.
+* It stores the image hashes in seperate sidecar files stored in the directory where the images are, so that, once generated, the hashes don't need to be generated again.
 * Allows for archiving of files, which will load and consider these hashes without the files needing to be present. Saves on disk space.
 * I built it how i wanted it, that's the only reason it exists.
 
@@ -14,7 +14,7 @@ First, head over to the [latest release](https://github.com/TheTimebreaker/dupli
 
 * pip: run `pip install url/to/wheel`
 * pip + requirements.txt: paste `duplicate_image_finder @ url/to/wheel` in the requirements file
-* pyproject.toml: paste `duplicate_image_finder @ url/to/wheel` into \[project\]/dependencies
+* pyproject.toml: paste `"duplicate_image_finder @ url/to/wheel"` into \[project\]/dependencies
 
 ---
 

@@ -12,6 +12,14 @@ dependencies = [
   "Send2Trash~=2.1.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "black~=26.5.1",
+    "mypy~=2.1.0",
+    "ruff~=0.15.17",
+    "types-Send2Trash~=2.1.0",
+]
+
 [build-system]
 requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
@@ -86,6 +94,8 @@ warn_return_any = true
 
 [[tool.mypy.overrides]]
 module = [
-  "imagesize"
+  "imagesize",
+  "imagehash",
+  "PIL",
 ]
 ignore_missing_imports = true
