@@ -1,7 +1,7 @@
 """Contains all the functions that are used to generate hashtables, sort them into groups of duplicate files, sorting and deleting."""
 
 import logging
-from collections.abc import Generator
+from collections.abc import Generator, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -57,7 +57,7 @@ def combine_hashtables(*dicts: Hashtable) -> Hashtable:
     return merged
 
 
-def get_recursive_hashtable(path: Path) -> Hashtable:
+def get_recursive_hashtable(path: Path | Iterable[Path]) -> Hashtable:
     """Loads/Generates the Hashtable of all files contained in path and its subdirectories."""
     logging.info("Loading hashes from %s... ", path)
     all_hashes: list[Hashtable] = []

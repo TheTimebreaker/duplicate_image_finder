@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import Literal
 
 from .duplicate_groups import delete_deletion_group, get_deletion_group, get_recursive_hashtable, iter_duplicate_groups
-from .utils import delete_temp_symlink_dir, make_temp_symlink_dir
 
 
 def find_and_delete_duplicates(
@@ -24,18 +23,7 @@ def find_and_delete_duplicates(
         Recycle: Send to trash bin. Defaults to "recycle".
         *sorting_criteria: Tuples that decide the sorting.
     """
-    if isinstance(paths, Path):
-        hashtable = get_recursive_hashtable(paths)
-        for duplicate_group in iter_duplicate_groups(hashtable):
-            deletion_group = get_deletion_group(duplicate_group, *sorting_criteria)
-            delete_deletion_group(deletion_group, deletion_method)
-
-    else:
-        tmppath = make_temp_symlink_dir(paths)
-        try:
-            hashtable = get_recursive_hashtable(tmppath)
-            for duplicate_group in iter_duplicate_groups(hashtable):
-                deletion_group = get_deletion_group(duplicate_group, *sorting_criteria)
-                delete_deletion_group(deletion_group, deletion_method)
-        finally:
-            delete_temp_symlink_dir(tmppath)
+    hashtable = get_recursive_hashtable(paths)
+    for duplicate_group in iter_duplicate_groups(hashtable):
+        deletion_group = get_deletion_group(duplicate_group, *sorting_criteria)
+        delete_deletion_group(deletion_group, deletion_method)
